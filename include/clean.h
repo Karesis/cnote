@@ -1,7 +1,6 @@
-// include/clean.h
+
 #pragma once
 
-// 依赖 fluf 的 allocer
 #include <core/mem/allocer.h>
 #include <stdbool.h>
 
