@@ -54,6 +54,15 @@ To use `cnote`, you must have the following tools installed and available in you
     sudo make uninstall
     ```
 
+    To update:
+    ```bash
+    # update files
+    make update
+    
+    # then install
+    sudo make install
+    ```
+
 ## Usage
 
 `cnote` is a command-line tool. You can get help at any time:
