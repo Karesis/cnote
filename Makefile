@@ -54,14 +54,27 @@ test:
 
 # === 安装与卸载 ===
 
-install: all
+install:
 	@printf "  INSTALL $(BINDIR)/cnote\n"
+	@if [ $$(id -u) -ne 0 ]; then \
+	    echo "Error: 'make install' must be run as root (e.g., sudo make install)."; \
+	    exit 1; \
+	fi
+	@if [ ! -f $(TARGET) ]; then \
+	    echo "Error: Target '$(TARGET)' not found."; \
+	    echo "Please run 'make' first, THEN 'sudo make install'."; \
+	    exit 1; \
+	fi
 	@mkdir -p $(BINDIR)
 	@cp $(TARGET) $(BINDIR)/cnote
 	@chmod +x $(BINDIR)/cnote
 
 uninstall:
 	@printf "  UNINSTALL $(BINDIR)/cnote\n"
+	@if [ $$(id -u) -ne 0 ]; then \
+	    echo "Error: 'make uninstall' must be run as root (e.g., sudo make uninstall)."; \
+	    exit 1; \
+	fi
 	@rm -f $(BINDIR)/cnote
 
 # === 更新 ===
