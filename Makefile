@@ -25,14 +25,13 @@ BINDIR = $(PREFIX)/bin
 
 
 # === 目标 ===
-.PHONY: all clean test fluf install uninstall
+.PHONY: all clean test fluf install uninstall update
 
 all: $(TARGET)
 
 $(TARGET): $(OBJS) $(FLUF_LIB_FILE)
 	@mkdir -p $(TARGET_DIR)
 	@printf "  LD   $@\n"
-	# 使用 $(LDFLAGS) 和 $(LDLIBS)
 	@$(CC) $(OBJS) $(LDFLAGS) $(LDLIBS) -o $@
 
 obj/%.o: src/%.c
@@ -64,3 +63,14 @@ install: all
 uninstall:
 	@printf "  UNINSTALL $(BINDIR)/cnote\n"
 	@rm -f $(BINDIR)/cnote
+
+# === 更新 ===
+
+update:
+	@printf "  GIT  Pulling latest changes...\n"
+	@git pull
+	@printf "  GIT  Updating submodules...\n"
+	@git submodule update --init --recursive
+	@printf "  MAKE Rebuilding project...\n"
+	@$(MAKE) all
+	@printf "==> Update complete. Run 'sudo make install' to install.\n"
