@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2025 Karesis
+ * All rights reserved.
+ */
 
 #pragma once
 

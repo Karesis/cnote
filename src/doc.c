@@ -1,4 +1,7 @@
-
+/*
+ * Copyright (c) 2025 Karesis
+ * All rights reserved.
+ */
 
 #include <doc.h>
 
@@ -59,18 +62,14 @@ static void parse_file_for_docs(allocer_t *alc, vec_t *entries,
         p += 2;
       }
       break;
-
     case DOC_STATE_COMMENT:
       if (c == '*' && next == '/') {
         state = DOC_STATE_SIGNATURE;
-
         comment_end = p;
-
         signature_start = skip_whitespace(p + 2, end);
         p += 1;
       }
       break;
-
     case DOC_STATE_SIGNATURE:
       if (c == '{' || c == ';') {
         doc_entry_t *entry = allocer_alloc(alc, layout_of(doc_entry_t));
@@ -91,9 +90,8 @@ static void parse_file_for_docs(allocer_t *alc, vec_t *entries,
         entry->signature = (str_slice_t){
             .ptr = signature_start, .len = (size_t)(p - signature_start + 1)};
 
-        if (!vec_push(entries, (void *)entry)) {
+        if (!vec_push(entries, (void *)entry))
           return;
-        }
 
         state = DOC_STATE_CODE;
         comment_start = NULL;
@@ -121,12 +119,6 @@ static bool has_doc_extension(const char *filename) {
   return false;
 }
 
-/**
- * @brief (核心) 递归遍历目录，解析文件
- *
- * [FIX #1] 'path_builder' 仅用于构建新路径,
- * 'current_path' 是一个稳定的、复制过的 C 字符串
- */
 static void traverse_directory(allocer_t *alc, vec_t *entries,
                                const char *current_path,
                                string_t *path_builder) {
@@ -139,16 +131,18 @@ static void traverse_directory(allocer_t *alc, vec_t *entries,
   struct dirent *dp;
   while ((dp = readdir(dir)) != NULL) {
     const char *name = dp->d_name;
-
     if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
       continue;
     }
 
     string_clear(path_builder);
-
     string_append_cstr(path_builder, current_path);
 
-    string_push(path_builder, '/');
+    size_t len = strlen(current_path);
+    if (len > 0 && current_path[len - 1] != '/') {
+      string_push(path_builder, '/');
+    }
+
     string_append_cstr(path_builder, name);
 
     const char *full_path = string_as_cstr(path_builder);
@@ -160,7 +154,6 @@ static void traverse_directory(allocer_t *alc, vec_t *entries,
     }
 
     if (S_ISDIR(statbuf.st_mode)) {
-
       traverse_directory(alc, entries, full_path, path_builder);
     } else if (has_doc_extension(full_path)) {
       str_slice_t content;
@@ -171,10 +164,155 @@ static void traverse_directory(allocer_t *alc, vec_t *entries,
       }
     }
   }
-
   closedir(dir);
 }
 
+/**
+ * @brief (辅助) 返回一个向左修剪了空白的切片
+ */
+static str_slice_t slice_trim_whitespace_left(str_slice_t s) {
+  const char *p = s.ptr;
+  const char *end = s.ptr + s.len;
+  while (p < end && (*p == ' ' || *p == '\t')) {
+    p++;
+  }
+  return (str_slice_t){.ptr = p, .len = (size_t)(end - p)};
+}
+
+/**
+ * @brief (辅助) 检查切片是否以字面量开头
+ */
+static bool slice_starts_with_lit(str_slice_t s, const char *lit) {
+  size_t lit_len = strlen(lit);
+  if (s.len < lit_len)
+    return false;
+  return strncmp(s.ptr, lit, lit_len) == 0;
+}
+
+/**
+ * @brief [FIX #1] (辅助) 追加切片, 将所有内部空白 "压缩" 为单个空格
+ */
+static void string_append_compact_slice(string_t *md, str_slice_t slice) {
+  const char *p = slice.ptr;
+  const char *end = slice.ptr + slice.len;
+  bool last_was_space = false;
+
+  p = skip_whitespace(p, end);
+
+  while (p < end) {
+    char c = *p++;
+    if (c == '\n' || c == '\t' || c == '\r') {
+      if (!last_was_space) {
+        string_push(md, ' ');
+        last_was_space = true;
+      }
+    } else if (c == ' ') {
+      if (!last_was_space) {
+        string_push(md, ' ');
+        last_was_space = true;
+      }
+    } else {
+      string_push(md, c);
+      last_was_space = false;
+    }
+  }
+}
+
+/**
+ * @brief (核心) 解析注释并将其格式化为 Markdown
+ */
+static void format_comment(string_t *md, str_slice_t comment) {
+  const char *p = comment.ptr;
+  const char *end = comment.ptr + comment.len;
+
+  bool in_list = false;
+
+  while (p < end) {
+    const char *line_end = p;
+    while (line_end < end && *line_end != '\n') {
+      line_end++;
+    }
+    str_slice_t line = {.ptr = p, .len = (size_t)(line_end - p)};
+
+    line = slice_trim_whitespace_left(line);
+
+    if (line.len > 0 && line.ptr[0] == '*') {
+      line.ptr++;
+      line.len--;
+      if (line.len > 0 && line.ptr[0] == ' ') {
+        line.ptr++;
+        line.len--;
+      }
+    }
+
+    line = slice_trim_whitespace_left(line);
+
+    if (slice_starts_with_lit(line, "@brief")) {
+      in_list = false;
+      line.ptr += 6;
+      line.len -= 6;
+      line = slice_trim_whitespace_left(line);
+      string_append_slice(md, line);
+      string_push(md, '\n');
+    } else if (slice_starts_with_lit(line, "@param")) {
+      if (!in_list) {
+        string_push(md, '\n');
+        in_list = true;
+      }
+
+      line.ptr += 6;
+      line.len -= 6;
+      line = slice_trim_whitespace_left(line);
+
+      const char *name_end = line.ptr;
+      while (name_end < line.ptr + line.len && *name_end != ' ' &&
+             *name_end != '\t') {
+        name_end++;
+      }
+      str_slice_t name_slice = {.ptr = line.ptr,
+                                .len = (size_t)(name_end - line.ptr)};
+
+      str_slice_t desc_slice = {
+          .ptr = name_end, .len = (size_t)((line.ptr + line.len) - name_end)};
+      desc_slice = slice_trim_whitespace_left(desc_slice);
+
+      string_append_cstr(md, "- **`");
+      string_append_slice(md, name_slice);
+      string_append_cstr(md, "`**: ");
+      string_append_slice(md, desc_slice);
+      string_push(md, '\n');
+    } else if (slice_starts_with_lit(line, "@return")) {
+      if (!in_list) {
+        string_push(md, '\n');
+        in_list = true;
+      }
+
+      line.ptr += 7;
+      line.len -= 7;
+      line = slice_trim_whitespace_left(line);
+
+      string_append_cstr(md, "- **Returns**: ");
+      string_append_slice(md, line);
+      string_push(md, '\n');
+    } else if (line.len > 0) {
+      in_list = false;
+      string_append_slice(md, line);
+      string_push(md, '\n');
+    } else {
+      in_list = false;
+      string_push(md, '\n');
+    }
+
+    p = line_end;
+    if (p < end && *p == '\n') {
+      p++;
+    }
+  }
+}
+
+/**
+ * @brief (核心) 将所有 entry 写入 Markdown 文件
+ */
 static bool generate_markdown(allocer_t *alc, vec_t *entries,
                               const char *out_path) {
   string_t md;
@@ -187,15 +325,18 @@ static bool generate_markdown(allocer_t *alc, vec_t *entries,
     doc_entry_t *entry = (void *)vec_get(entries, i);
 
     string_append_cstr(&md, "## `");
-    string_append_slice(&md, entry->signature);
+
+    string_append_compact_slice(&md, entry->signature);
+
     string_append_cstr(&md, "`\n\n");
 
     string_append_cstr(&md, "*Source: ");
     string_append_slice(&md, entry->filepath);
     string_append_cstr(&md, "*\n\n");
 
-    string_append_slice(&md, entry->comment);
-    string_append_cstr(&md, "\n\n---\n\n");
+    format_comment(&md, entry->comment);
+
+    string_append_cstr(&md, "\n---\n\n");
   }
 
   str_slice_t md_slice = string_as_slice(&md);

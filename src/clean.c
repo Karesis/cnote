@@ -1,4 +1,7 @@
-
+/*
+ * Copyright (c) 2025 Karesis
+ * All rights reserved.
+ */
 
 #include <clean.h>
 
@@ -6,9 +9,15 @@
 #include <std/io/file.h>
 #include <std/string/str_slice.h>
 #include <std/string/string.h>
+#include <std/vec.h>
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 typedef enum {
   STATE_CODE,
@@ -18,7 +27,14 @@ typedef enum {
   STATE_CHAR,
 } clean_state_t;
 
-bool cnote_clean_file(allocer_t *alc, const char *filename) {
+/**
+ * @brief [重命名] 清理单个文件 (核心逻辑)
+ * @param style_file [新] 可选的 .clang-format 路径
+ */
+static bool clean_single_file(allocer_t *alc, const char *filename,
+                              const char *style_file) {
+
+  printf("  Cleaning: %s\n", filename);
 
   str_slice_t content;
   if (!read_file_to_slice(alc, filename, &content)) {
@@ -38,7 +54,6 @@ bool cnote_clean_file(allocer_t *alc, const char *filename) {
     char next = (p + 1 < end) ? *(p + 1) : '\0';
 
     switch (state) {
-
     case STATE_CODE:
       if (c == '/' && next == '/') {
         state = STATE_LINE_COMMENT;
@@ -58,23 +73,20 @@ bool cnote_clean_file(allocer_t *alc, const char *filename) {
         string_push(&builder, c);
       }
       break;
-
     case STATE_LINE_COMMENT:
       if (c == '\n') {
         state = STATE_CODE;
         string_push(&builder, c);
       }
       break;
-
     case STATE_BLOCK_COMMENT:
       string_push(&builder, c);
       if (c == '*' && next == '/') {
-        string_push(&builder, next);
         state = STATE_CODE;
+        string_push(&builder, next);
         p++;
       }
       break;
-
     case STATE_STRING:
       string_push(&builder, c);
       if (c == '\\') {
@@ -86,7 +98,6 @@ bool cnote_clean_file(allocer_t *alc, const char *filename) {
         state = STATE_CODE;
       }
       break;
-
     case STATE_CHAR:
       string_push(&builder, c);
       if (c == '\\') {
@@ -99,28 +110,30 @@ bool cnote_clean_file(allocer_t *alc, const char *filename) {
       }
       break;
     }
-
     p++;
   }
 
   str_slice_t result_slice = string_as_slice(&builder);
-
   if (!write_file_bytes(filename, (const void *)result_slice.ptr,
                         result_slice.len)) {
     fprintf(stderr, "Error: Failed to write file '%s'.\n", filename);
     string_destroy(&builder);
     return false;
   }
-
   string_destroy(&builder);
 
   string_t cmd;
-  string_init(&cmd, alc, 64);
+  string_init(&cmd, alc, 256);
 
   string_append_cstr(&cmd, "clang-format -i ");
-  string_append_cstr(&cmd, filename);
 
-  printf("  Running: %s\n", string_as_cstr(&cmd));
+  if (style_file) {
+    string_append_cstr(&cmd, "-style=file:");
+    string_append_cstr(&cmd, style_file);
+    string_push(&cmd, ' ');
+  }
+
+  string_append_cstr(&cmd, filename);
 
   int ret = system(string_as_cstr(&cmd));
 
@@ -130,6 +143,123 @@ bool cnote_clean_file(allocer_t *alc, const char *filename) {
   }
 
   string_destroy(&cmd);
+  return true;
+}
 
+/**
+ * @brief [新] 检查路径是否应被豁免
+ * (这是一个简单的子字符串匹配)
+ */
+static bool is_excluded(const char *path, vec_t *exclusions) {
+  for (size_t i = 0; i < vec_count(exclusions); i++) {
+    const char *pattern = (const char *)vec_get(exclusions, i);
+
+    if (strstr(path, pattern) != NULL) {
+      printf("  Excluding: %s (matches '%s')\n", path, pattern);
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * @brief [新] 检查文件扩展名
+ */
+static bool is_cleanable_file(const char *filename) {
+  const char *dot = strrchr(filename, '.');
+  if (!dot)
+    return false;
+  if (strcmp(dot, ".c") == 0)
+    return true;
+  if (strcmp(dot, ".h") == 0)
+    return true;
+  return false;
+}
+
+/**
+ * @brief [新] 递归遍历目录以进行清理
+ * (从 doc.c 复制而来并修改)
+ */
+static void traverse_dir_for_clean(allocer_t *alc, const char *current_path,
+                                   vec_t *exclusions, const char *style_file,
+                                   string_t *path_builder) {
+  DIR *dir = opendir(current_path);
+  if (!dir) {
+    fprintf(stderr, "Warning: Could not open directory '%s'\n", current_path);
+    return;
+  }
+
+  struct dirent *dp;
+  while ((dp = readdir(dir)) != NULL) {
+    const char *name = dp->d_name;
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+      continue;
+    }
+
+    string_clear(path_builder);
+    string_append_cstr(path_builder, current_path);
+    string_push(path_builder, '/');
+    string_append_cstr(path_builder, name);
+
+    const char *full_path = string_as_cstr(path_builder);
+
+    if (is_excluded(full_path, exclusions)) {
+      continue;
+    }
+
+    struct stat statbuf;
+    if (stat(full_path, &statbuf) != 0) {
+      fprintf(stderr, "Warning: Could not stat file '%s'\n", full_path);
+      continue;
+    }
+
+    if (S_ISDIR(statbuf.st_mode)) {
+
+      traverse_dir_for_clean(alc, full_path, exclusions, style_file,
+                             path_builder);
+    } else if (is_cleanable_file(full_path)) {
+
+      clean_single_file(alc, full_path, style_file);
+    }
+  }
+  closedir(dir);
+}
+
+/**
+ * @brief [新] 'clean' 命令的入口函数
+ */
+bool cnote_clean_run(allocer_t *alc, vec_t *targets, vec_t *exclusions,
+                     const char *style_file) {
+  string_t path_builder;
+  if (!string_init(&path_builder, alc, 256)) {
+    return false;
+  }
+
+  for (size_t i = 0; i < vec_count(targets); i++) {
+    const char *target_path = (const char *)vec_get(targets, i);
+
+    if (is_excluded(target_path, exclusions)) {
+      continue;
+    }
+
+    struct stat statbuf;
+    if (stat(target_path, &statbuf) != 0) {
+      fprintf(stderr, "Warning: Could not stat target '%s'\n", target_path);
+      continue;
+    }
+
+    if (S_ISDIR(statbuf.st_mode)) {
+
+      traverse_dir_for_clean(alc, target_path, exclusions, style_file,
+                             &path_builder);
+    } else {
+
+      if (is_cleanable_file(target_path)) {
+        clean_single_file(alc, target_path, style_file);
+      }
+    }
+  }
+
+  string_destroy(&path_builder);
   return true;
 }

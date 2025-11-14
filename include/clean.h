@@ -1,14 +1,27 @@
+/*
+ * Copyright (c) 2025 Karesis
+ * All rights reserved.
+ */
 
 #pragma once
 
 #include <core/mem/allocer.h>
+#include <std/vec.h>
 #include <stdbool.h>
 
 /**
- * @brief 从文件中移除 '//' 风格的注释并用 clang-format 格式化。
+ * @brief 运行 'clean' 命令
  *
- * @param alc      用于所有临时分配的分配器 (builder, read buffer)
- * @param filename 要处理的文件名 (原地修改)
- * @return bool     true 成功, false 失败 (例如文件无法读取)
+ * 遍历所有 'targets' (文件或目录)，清理 .c 和 .h 文件，
+ * 同时跳过 'exclusions' 中的任何路径。
+ *
+ * @param alc      用于所有临时分配的 Arena
+ * @param targets  (vec_t*) 指向 Vec<const char*> 的指针, 包含要处理的文件/目录
+ * @param exclusions (vec_t*) 指向 Vec<const char*> 的指针,
+ * 包含要跳过的路径(子字符串匹配)
+ * @param style_file (可选) 指向 .clang-format 文件的路径, 如果为 NULL
+ * 则使用默认
+ * @return bool     true 成功, false 失败
  */
-bool cnote_clean_file(allocer_t *alc, const char *filename);
+bool cnote_clean_run(allocer_t *alc, vec_t *targets, vec_t *exclusions,
+                     const char *style_file);
