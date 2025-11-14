@@ -105,10 +105,10 @@ cnote doc include/ docs/api.md
 
 #### `license`
 
-Apply the license header from `MY_LICENSE.txt` to all files in `src/` and `include/`:
+Apply the license header from a file (e.g., `MY_LICENSE`) to all files in `src/` and `include/`:
 
 ```bash
-cnote license -f MY_LICENSE.txt src/ include/
+cnote license -f MY_LICENSE src/ include/
 ```
 
 ## API Documentation
@@ -117,5 +117,5 @@ For information on the internal C API (e.g., for contributing to `cnote`), see t
 
 ## License
 
-This project is licensed under the [Your License Name, e.g., MIT] License. See the [MY\_LICENSE.txt](LICENSE) file for details.
+This project is licensed under the Apache-2.0 License. See the [LICENSE](LICENSE) file for details.
 
