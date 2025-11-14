@@ -80,6 +80,12 @@ uninstall:
 # === 更新 ===
 
 update:
+	@printf "  UPDATE\n"
+	@if [ $$(id -u) -eq 0 ]; then \
+	    echo "Error: Do not run 'make update' as root (with sudo)."; \
+	    echo "Run 'make update' as a normal user."; \
+	    exit 1; \
+	fi
 	@printf "  GIT  Pulling latest changes...\n"
 	@git pull
 	@printf "  GIT  Updating submodules...\n"
