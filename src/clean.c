@@ -14,8 +14,11 @@
  *    limitations under the License.
  */
 
+
+
 #include <clean.h>
 
+#include <core/mem/layout.h>
 #include <core/msg/asrt.h>
 #include <std/io/file.h>
 #include <std/string/str_slice.h>
@@ -39,9 +42,18 @@ typedef enum {
 } clean_state_t;
 
 /**
- * @brief [重命名] 清理单个文件 (核心逻辑)
- * @param style_file [新] 可选的 .clang-format 路径
+ * @brief (辅助) 复制一个 C 字符串到 Arena
  */
+static inline char *allocer_strdup(allocer_t *alc, const char *s) {
+  size_t len = strlen(s);
+  layout_t layout = layout_of_array(char, len + 1);
+  char *new_s = allocer_alloc(alc, layout);
+  if (new_s) {
+    memcpy(new_s, s, len + 1);
+  }
+  return new_s;
+}
+
 static bool clean_single_file(allocer_t *alc, const char *filename,
                               const char *style_file) {
 
@@ -135,36 +147,25 @@ static bool clean_single_file(allocer_t *alc, const char *filename,
 
   string_t cmd;
   string_init(&cmd, alc, 256);
-
   string_append_cstr(&cmd, "clang-format -i ");
-
   if (style_file) {
     string_append_cstr(&cmd, "-style=file:");
     string_append_cstr(&cmd, style_file);
     string_push(&cmd, ' ');
   }
-
   string_append_cstr(&cmd, filename);
-
   int ret = system(string_as_cstr(&cmd));
-
   if (ret != 0) {
     fprintf(stderr,
             "Warning: clang-format command failed (is it installed?)\n");
   }
-
   string_destroy(&cmd);
   return true;
 }
 
-/**
- * @brief [新] 检查路径是否应被豁免
- * (这是一个简单的子字符串匹配)
- */
 static bool is_excluded(const char *path, vec_t *exclusions) {
   for (size_t i = 0; i < vec_count(exclusions); i++) {
     const char *pattern = (const char *)vec_get(exclusions, i);
-
     if (strstr(path, pattern) != NULL) {
       printf("  Excluding: %s (matches '%s')\n", path, pattern);
       return true;
@@ -173,9 +174,6 @@ static bool is_excluded(const char *path, vec_t *exclusions) {
   return false;
 }
 
-/**
- * @brief [新] 检查文件扩展名
- */
 static bool is_cleanable_file(const char *filename) {
   const char *dot = strrchr(filename, '.');
   if (!dot)
@@ -187,10 +185,6 @@ static bool is_cleanable_file(const char *filename) {
   return false;
 }
 
-/**
- * @brief [新] 递归遍历目录以进行清理
- * (从 doc.c 复制而来并修改)
- */
 static void traverse_dir_for_clean(allocer_t *alc, const char *current_path,
                                    vec_t *exclusions, const char *style_file,
                                    string_t *path_builder) {
@@ -209,7 +203,10 @@ static void traverse_dir_for_clean(allocer_t *alc, const char *current_path,
 
     string_clear(path_builder);
     string_append_cstr(path_builder, current_path);
-    string_push(path_builder, '/');
+
+    if (current_path[strlen(current_path) - 1] != '/') {
+      string_push(path_builder, '/');
+    }
     string_append_cstr(path_builder, name);
 
     const char *full_path = string_as_cstr(path_builder);
@@ -226,19 +223,18 @@ static void traverse_dir_for_clean(allocer_t *alc, const char *current_path,
 
     if (S_ISDIR(statbuf.st_mode)) {
 
-      traverse_dir_for_clean(alc, full_path, exclusions, style_file,
-                             path_builder);
+      char *stable_path = allocer_strdup(alc, full_path);
+      if (stable_path) {
+        traverse_dir_for_clean(alc, stable_path, exclusions, style_file,
+                               path_builder);
+      }
     } else if (is_cleanable_file(full_path)) {
-
       clean_single_file(alc, full_path, style_file);
     }
   }
   closedir(dir);
 }
 
-/**
- * @brief [新] 'clean' 命令的入口函数
- */
 bool cnote_clean_run(allocer_t *alc, vec_t *targets, vec_t *exclusions,
                      const char *style_file) {
   string_t path_builder;
@@ -261,10 +257,12 @@ bool cnote_clean_run(allocer_t *alc, vec_t *targets, vec_t *exclusions,
 
     if (S_ISDIR(statbuf.st_mode)) {
 
-      traverse_dir_for_clean(alc, target_path, exclusions, style_file,
-                             &path_builder);
+      char *stable_path = allocer_strdup(alc, target_path);
+      if (stable_path) {
+        traverse_dir_for_clean(alc, stable_path, exclusions, style_file,
+                               &path_builder);
+      }
     } else {
-
       if (is_cleanable_file(target_path)) {
         clean_single_file(alc, target_path, style_file);
       }

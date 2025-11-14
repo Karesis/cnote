@@ -14,6 +14,8 @@
  *    limitations under the License.
  */
 
+
+
 #include <doc.h>
 
 #include <core/mem/layout.h>
@@ -28,6 +30,19 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+/**
+ * @brief (辅助) 复制一个 C 字符串到 Arena
+ */
+static inline char *allocer_strdup(allocer_t *alc, const char *s) {
+  size_t len = strlen(s);
+  layout_t layout = layout_of_array(char, len + 1);
+  char *new_s = allocer_alloc(alc, layout);
+  if (new_s) {
+    memcpy(new_s, s, len + 1);
+  }
+  return new_s;
+}
 
 typedef struct {
   str_slice_t filepath;
@@ -87,14 +102,7 @@ static void parse_file_for_docs(allocer_t *alc, vec_t *entries,
         if (!entry)
           return;
 
-        size_t path_len = strlen(filepath);
-        char *path_copy =
-            allocer_alloc(alc, layout_of_array(char, path_len + 1));
-        if (!path_copy)
-          return;
-        memcpy(path_copy, filepath, path_len);
-        path_copy[path_len] = '\0';
-        entry->filepath = (str_slice_t){.ptr = path_copy, .len = path_len};
+        entry->filepath = slice_from_cstr(filepath);
 
         entry->comment = (str_slice_t){
             .ptr = comment_start, .len = (size_t)(comment_end - comment_start)};
@@ -165,11 +173,19 @@ static void traverse_directory(allocer_t *alc, vec_t *entries,
     }
 
     if (S_ISDIR(statbuf.st_mode)) {
-      traverse_directory(alc, entries, full_path, path_builder);
+
+      char *stable_path = allocer_strdup(alc, full_path);
+      if (stable_path) {
+        traverse_directory(alc, entries, stable_path, path_builder);
+      }
     } else if (has_doc_extension(full_path)) {
       str_slice_t content;
       if (read_file_to_slice(alc, full_path, &content)) {
-        parse_file_for_docs(alc, entries, content, full_path);
+
+        char *stable_path = allocer_strdup(alc, full_path);
+        if (stable_path) {
+          parse_file_for_docs(alc, entries, content, stable_path);
+        }
       } else {
         fprintf(stderr, "Warning: Could not read file '%s'\n", full_path);
       }
@@ -178,9 +194,6 @@ static void traverse_directory(allocer_t *alc, vec_t *entries,
   closedir(dir);
 }
 
-/**
- * @brief (辅助) 返回一个向左修剪了空白的切片
- */
 static str_slice_t slice_trim_whitespace_left(str_slice_t s) {
   const char *p = s.ptr;
   const char *end = s.ptr + s.len;
@@ -190,9 +203,6 @@ static str_slice_t slice_trim_whitespace_left(str_slice_t s) {
   return (str_slice_t){.ptr = p, .len = (size_t)(end - p)};
 }
 
-/**
- * @brief (辅助) 检查切片是否以字面量开头
- */
 static bool slice_starts_with_lit(str_slice_t s, const char *lit) {
   size_t lit_len = strlen(lit);
   if (s.len < lit_len)
@@ -200,16 +210,11 @@ static bool slice_starts_with_lit(str_slice_t s, const char *lit) {
   return strncmp(s.ptr, lit, lit_len) == 0;
 }
 
-/**
- * @brief [FIX #1] (辅助) 追加切片, 将所有内部空白 "压缩" 为单个空格
- */
 static void string_append_compact_slice(string_t *md, str_slice_t slice) {
   const char *p = slice.ptr;
   const char *end = slice.ptr + slice.len;
   bool last_was_space = false;
-
   p = skip_whitespace(p, end);
-
   while (p < end) {
     char c = *p++;
     if (c == '\n' || c == '\t' || c == '\r') {
@@ -229,24 +234,17 @@ static void string_append_compact_slice(string_t *md, str_slice_t slice) {
   }
 }
 
-/**
- * @brief (核心) 解析注释并将其格式化为 Markdown
- */
 static void format_comment(string_t *md, str_slice_t comment) {
   const char *p = comment.ptr;
   const char *end = comment.ptr + comment.len;
-
   bool in_list = false;
-
   while (p < end) {
     const char *line_end = p;
     while (line_end < end && *line_end != '\n') {
       line_end++;
     }
     str_slice_t line = {.ptr = p, .len = (size_t)(line_end - p)};
-
     line = slice_trim_whitespace_left(line);
-
     if (line.len > 0 && line.ptr[0] == '*') {
       line.ptr++;
       line.len--;
@@ -255,7 +253,6 @@ static void format_comment(string_t *md, str_slice_t comment) {
         line.len--;
       }
     }
-
     line = slice_trim_whitespace_left(line);
 
     if (slice_starts_with_lit(line, "@brief")) {
@@ -270,11 +267,9 @@ static void format_comment(string_t *md, str_slice_t comment) {
         string_push(md, '\n');
         in_list = true;
       }
-
       line.ptr += 6;
       line.len -= 6;
       line = slice_trim_whitespace_left(line);
-
       const char *name_end = line.ptr;
       while (name_end < line.ptr + line.len && *name_end != ' ' &&
              *name_end != '\t') {
@@ -282,11 +277,9 @@ static void format_comment(string_t *md, str_slice_t comment) {
       }
       str_slice_t name_slice = {.ptr = line.ptr,
                                 .len = (size_t)(name_end - line.ptr)};
-
       str_slice_t desc_slice = {
           .ptr = name_end, .len = (size_t)((line.ptr + line.len) - name_end)};
       desc_slice = slice_trim_whitespace_left(desc_slice);
-
       string_append_cstr(md, "- **`");
       string_append_slice(md, name_slice);
       string_append_cstr(md, "`**: ");
@@ -297,11 +290,9 @@ static void format_comment(string_t *md, str_slice_t comment) {
         string_push(md, '\n');
         in_list = true;
       }
-
       line.ptr += 7;
       line.len -= 7;
       line = slice_trim_whitespace_left(line);
-
       string_append_cstr(md, "- **Returns**: ");
       string_append_slice(md, line);
       string_push(md, '\n');
@@ -313,7 +304,6 @@ static void format_comment(string_t *md, str_slice_t comment) {
       in_list = false;
       string_push(md, '\n');
     }
-
     p = line_end;
     if (p < end && *p == '\n') {
       p++;
@@ -321,39 +311,26 @@ static void format_comment(string_t *md, str_slice_t comment) {
   }
 }
 
-/**
- * @brief (核心) 将所有 entry 写入 Markdown 文件
- */
 static bool generate_markdown(allocer_t *alc, vec_t *entries,
                               const char *out_path) {
   string_t md;
   string_init(&md, alc, 4096);
-
   string_append_cstr(&md, "# API Documentation\n\n");
   string_append_cstr(&md, "Generated by `cnote`.\n\n");
-
   for (size_t i = 0; i < vec_count(entries); i++) {
     doc_entry_t *entry = (void *)vec_get(entries, i);
-
     string_append_cstr(&md, "## `");
-
     string_append_compact_slice(&md, entry->signature);
-
     string_append_cstr(&md, "`\n\n");
-
     string_append_cstr(&md, "*Source: ");
     string_append_slice(&md, entry->filepath);
     string_append_cstr(&md, "*\n\n");
-
     format_comment(&md, entry->comment);
-
     string_append_cstr(&md, "\n---\n\n");
   }
-
   str_slice_t md_slice = string_as_slice(&md);
   bool ok =
       write_file_bytes(out_path, (const void *)md_slice.ptr, md_slice.len);
-
   string_destroy(&md);
   return ok;
 }
@@ -365,19 +342,23 @@ bool cnote_doc_run(allocer_t *alc, const char *src_dir, const char *out_path) {
     fprintf(stderr, "Error: Failed to initialize vector (OOM?)\n");
     return false;
   }
-
   string_t path_builder;
   if (!string_init(&path_builder, alc, 256)) {
     vec_destroy(&entries);
     return false;
   }
-
   printf("  Scanning `%s`...\n", src_dir);
 
-  traverse_directory(alc, &entries, src_dir, &path_builder);
+  char *stable_src_dir = allocer_strdup(alc, src_dir);
+  if (!stable_src_dir) {
+    string_destroy(&path_builder);
+    vec_destroy(&entries);
+    return false;
+  }
+
+  traverse_directory(alc, &entries, stable_src_dir, &path_builder);
 
   printf("  Found %zu documentation entries.\n", vec_count(&entries));
-
   if (vec_count(&entries) > 0) {
     printf("  Generating markdown to `%s`...\n", out_path);
     if (!generate_markdown(alc, &entries, out_path)) {
@@ -392,6 +373,5 @@ bool cnote_doc_run(allocer_t *alc, const char *src_dir, const char *out_path) {
 
   string_destroy(&path_builder);
   vec_destroy(&entries);
-
   return true;
 }
