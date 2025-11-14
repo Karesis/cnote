@@ -1,8 +1,6 @@
 CC = clang
 CFLAGS = -g -Wall -Wextra -Wno-unused-parameter -std=c23 -DDEBUG -Iinclude
-# LDFLAGS 通常用于存放 -L 和 -Wl, 等链接器选项
 LDFLAGS = 
-# LDLIBS 通常用于存放 -l 库
 LDLIBS = 
 
 FLUF_DIR = vendor/fluf
@@ -20,15 +18,13 @@ SRCS = $(wildcard src/*.c)
 OBJS = $(patsubst src/%.c,obj/%.o,$(SRCS))
 
 # === 安装路径 ===
-# PREFIX 默认使用 /usr/local，这是本地编译软件的标准位置
-# ?= 允许用户从外部覆盖, 例如: make PREFIX=~/.local install
+# PREFIX 默认使用 /usr/local
+# ?= 允许从外部覆盖, 例如: make PREFIX=~/.local install
 PREFIX ?= /usr/local
 BINDIR = $(PREFIX)/bin
 
 
 # === 目标 ===
-
-# .PHONY 告诉 make 这些目标不是真实的文件名
 .PHONY: all clean test fluf install uninstall
 
 all: $(TARGET)
