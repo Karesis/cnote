@@ -5,7 +5,7 @@ cnote is a useful tool that can help you manage your C codes.
 ## Features
 
 * **`clean`**: Recursively removes `//` comments and applies `clang-format` to C source files.
-* **`doc`**: Generates simple Markdown API documentation from `/** @brief ... */` style comments in source files.
+* **`doc`**: Generates a multi-page, navigable Markdown documentation site from `/** @brief ... */` style comments in source files.
 * **`license`**: Applies or updates a license header to all source files, skipping files that already have it.
 
 ## Requirements
@@ -106,23 +106,29 @@ cnote clean -s ./.clang-format src/
 
 #### `doc`
 
-Generate documentation from all sources in `include/` and write to `docs/api.md`:
+Generate documentation from all sources in `src/` and `include/` and write the site to the `docs/` directory:
 
 ```bash
-cnote doc include/ docs/api.md
-```
+# cnote doc <source-directory> <output-directory>
+cnote doc include docs/reference
+````
 
-#### `license`
+After running, this will create a structure like this:
 
-Apply the license header from a file (e.g., `MY_LICENSE`) to all files in `src/` and `include/`:
-
-```bash
-cnote license -f MY_LICENSE src/ include/
+```text
+docs/
+└──reference/
+    ├── SUMMARY.md       (The main table of contents)
+    └── api/
+        ├── include_clean_h.md
+        ├── include_doc_h.md
+        ├── src_main_c.md
+        └── ...etc
 ```
 
 ## API Documentation
 
-For information on the internal C API (e.g., for contributing to `cnote`), see the generated [API Documentation](docs/api.md).
+For information on the internal C API (e.g., for contributing to `cnote`), see the generated api entry [API Entry](docs/reference/SUMMARY.md).
 
 ## License
 
