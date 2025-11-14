@@ -14,8 +14,11 @@
  *    limitations under the License.
  */
 
+
+
 #include <license.h>
 
+#include <core/mem/layout.h>
 #include <core/msg/asrt.h>
 #include <std/io/file.h>
 #include <std/string/str_slice.h>
@@ -31,18 +34,24 @@
 #include <unistd.h>
 
 /**
- * @brief (辅助) 检查切片是否以另一个切片开头
+ * @brief (辅助) 复制一个 C 字符串到 Arena
  */
+static inline char *allocer_strdup(allocer_t *alc, const char *s) {
+  size_t len = strlen(s);
+  layout_t layout = layout_of_array(char, len + 1);
+  char *new_s = allocer_alloc(alc, layout);
+  if (new_s) {
+    memcpy(new_s, s, len + 1);
+  }
+  return new_s;
+}
+
 static bool slice_starts_with_slice(str_slice_t s, str_slice_t prefix) {
   if (prefix.len > s.len)
     return false;
-
   return memcmp(s.ptr, prefix.ptr, prefix.len) == 0;
 }
 
-/**
- * @brief (辅助) 检查切片是否以 C 字符串字面量开头
- */
 static bool slice_starts_with_lit(str_slice_t s, const char *lit) {
   size_t lit_len = strlen(lit);
   if (lit_len > s.len)
@@ -59,9 +68,6 @@ static ssize_t find_first_block_comment_end(str_slice_t s) {
   return -1;
 }
 
-/**
- * @brief (辅助) 跳过空白字符 (从 doc.c 复制)
- */
 static const char *skip_whitespace(const char *p, const char *end) {
   while (p < end && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) {
     p++;
@@ -73,34 +79,25 @@ static void format_license_as_comment(allocer_t *alc, str_slice_t raw_license,
                                       string_t *out_builder) {
   (void)alc;
   string_append_cstr(out_builder, "/*\n");
-
   const char *p = raw_license.ptr;
   const char *end = raw_license.ptr + raw_license.len;
-
   while (p < end) {
     string_append_cstr(out_builder, " * ");
-
     const char *line_end = p;
     while (line_end < end && *line_end != '\n') {
       line_end++;
     }
     str_slice_t line = {.ptr = p, .len = (size_t)(line_end - p)};
     string_append_slice(out_builder, line);
-
     string_push(out_builder, '\n');
-
     p = line_end;
     if (p < end && *p == '\n') {
       p++;
     }
   }
-
   string_append_cstr(out_builder, " */\n\n");
 }
 
-/**
- * @brief 检查文件扩展名
- */
 static bool is_licensable_file(const char *filename) {
   const char *dot = strrchr(filename, '.');
   if (!dot)
@@ -112,9 +109,6 @@ static bool is_licensable_file(const char *filename) {
   return false;
 }
 
-/**
- * @brief (核心) 对单个文件应用许可证逻辑
- */
 static bool apply_license_to_file(allocer_t *alc, const char *filepath,
                                   str_slice_t golden_header_slice) {
 
@@ -123,67 +117,47 @@ static bool apply_license_to_file(allocer_t *alc, const char *filepath,
     fprintf(stderr, "Warning: Could not read file '%s'\n", filepath);
     return false;
   }
-
   str_slice_t rest_of_file;
   bool needs_write = false;
-
   if (slice_starts_with_slice(file_content, golden_header_slice)) {
     printf("  License OK: %s\n", filepath);
     return true;
   }
-
   if (slice_starts_with_lit(file_content, "/*")) {
     printf("  Updating license: %s\n", filepath);
     needs_write = true;
-
     ssize_t end_pos = find_first_block_comment_end(file_content);
-
     if (end_pos == -1) {
-
       fprintf(stderr,
               "Warning: Skipping '%s' (malformed block comment at start)\n",
               filepath);
       return false;
     }
-
     const char *after_comment = file_content.ptr + end_pos + 2;
     const char *content_start =
         skip_whitespace(after_comment, file_content.ptr + file_content.len);
-
     rest_of_file = (str_slice_t){
         .ptr = content_start,
         .len = (size_t)((file_content.ptr + file_content.len) - content_start)};
-  }
-
-  else {
+  } else {
     printf("  Adding license: %s\n", filepath);
     needs_write = true;
-
     rest_of_file = file_content;
   }
-
   if (needs_write) {
-
     string_t builder;
     string_init(&builder, alc, golden_header_slice.len + rest_of_file.len + 1);
-
     string_append_slice(&builder, golden_header_slice);
     string_append_slice(&builder, rest_of_file);
-
     str_slice_t new_content = string_as_slice(&builder);
     bool ok = write_file_bytes(filepath, (const void *)new_content.ptr,
                                new_content.len);
-
     string_destroy(&builder);
     return ok;
   }
-
   return true;
 }
 
-/**
- * @brief (辅助) 检查路径是否应被豁免 (从 clean.c 复制)
- */
 static bool is_excluded(const char *path, vec_t *exclusions) {
   for (size_t i = 0; i < vec_count(exclusions); i++) {
     const char *pattern = (const char *)vec_get(exclusions, i);
@@ -196,7 +170,7 @@ static bool is_excluded(const char *path, vec_t *exclusions) {
 }
 
 /**
- * @brief (辅助) 递归遍历目录 (从 clean.c 复制并修改)
+ * @brief (辅助) 递归遍历目录
  */
 static void traverse_dir_for_license(allocer_t *alc, const char *current_path,
                                      vec_t *exclusions,
@@ -234,8 +208,12 @@ static void traverse_dir_for_license(allocer_t *alc, const char *current_path,
     }
 
     if (S_ISDIR(statbuf.st_mode)) {
-      traverse_dir_for_license(alc, full_path, exclusions, golden_header_slice,
-                               path_builder);
+
+      char *stable_path = allocer_strdup(alc, full_path);
+      if (stable_path) {
+        traverse_dir_for_license(alc, stable_path, exclusions,
+                                 golden_header_slice, path_builder);
+      }
     } else if (is_licensable_file(full_path)) {
       apply_license_to_file(alc, full_path, golden_header_slice);
     }
@@ -283,8 +261,12 @@ bool cnote_license_run(allocer_t *alc, vec_t *targets, vec_t *exclusions,
     }
 
     if (S_ISDIR(statbuf.st_mode)) {
-      traverse_dir_for_license(alc, target_path, exclusions, golden_slice,
-                               &path_builder);
+
+      char *stable_path = allocer_strdup(alc, target_path);
+      if (stable_path) {
+        traverse_dir_for_license(alc, stable_path, exclusions, golden_slice,
+                                 &path_builder);
+      }
     } else {
       if (is_licensable_file(target_path)) {
         apply_license_to_file(alc, target_path, golden_slice);

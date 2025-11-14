@@ -14,8 +14,6 @@
  *    limitations under the License.
  */
 
-
-
 #include <clean.h>
 
 #include <core/mem/layout.h>
