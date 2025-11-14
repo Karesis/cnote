@@ -73,8 +73,8 @@ Usage: cnote <command> [options] [targets...]
 
 Commands:
   clean [opts] <paths...>    Removes '//' comments and runs clang-format.
-  doc <src_dir> <out_path>      Generates markdown documentation.
-  license [opts] <paths...>   Appies or maintains a license header.
+  doc <src_dir> <out_dir>     Generates markdown documentation (mdBook compatible).
+  license [opts] <paths...>   Applies or maintains a license header.
 
 General Options:
   -h, --help                 Show this help message.
