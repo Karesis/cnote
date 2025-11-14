@@ -126,6 +126,14 @@ docs/
         └── ...etc
 ```
 
+#### `license`
+
+Apply the license header from `LICENSE_HEADER` to all files in `src/` and `include/`:
+
+```bash
+cnote license -f LICENSE_HEADER src/ include/
+```
+
 ## API Documentation
 
 For information on the internal C API (e.g., for contributing to `cnote`), see the generated api entry [API Entry](docs/reference/SUMMARY.md).
